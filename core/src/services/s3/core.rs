@@ -30,6 +30,7 @@ use http::header::CONTENT_TYPE;
 use http::header::HOST;
 use http::header::IF_MATCH;
 use http::header::IF_NONE_MATCH;
+use http::HeaderMap;
 use http::HeaderValue;
 use http::Request;
 use http::Response;
@@ -62,6 +63,9 @@ mod constants {
         "x-amz-copy-source-server-side-encryption-customer-key";
     pub const X_AMZ_COPY_SOURCE_SERVER_SIDE_ENCRYPTION_CUSTOMER_KEY_MD5: &str =
         "x-amz-copy-source-server-side-encryption-customer-key-md5";
+
+    pub const X_AMZ_VERSION_ID: &str = "x-amz-version-id";
+    pub const QUERY_VERSION_ID: &str = "versionId";
 
     pub const RESPONSE_CONTENT_DISPOSITION: &str = "response-content-disposition";
     pub const RESPONSE_CONTENT_TYPE: &str = "response-content-type";
@@ -261,6 +265,9 @@ impl S3Core {
                 percent_encode_path(override_cache_control)
             ))
         }
+        if let Some(version) = args.version() {
+            query_args.push(format!("{}={}", constants::QUERY_VERSION_ID, version))
+        }
         if !query_args.is_empty() {
             url.push_str(&format!("?{}", query_args.join("&")));
         }
@@ -312,6 +319,9 @@ impl S3Core {
                 constants::RESPONSE_CACHE_CONTROL,
                 percent_encode_path(override_cache_control)
             ))
+        }
+        if let Some(version) = args.version() {
+            query_args.push(format!("{}={}", constants::QUERY_VERSION_ID, version))
         }
         if !query_args.is_empty() {
             url.push_str(&format!("?{}", query_args.join("&")));
@@ -409,10 +419,18 @@ impl S3Core {
         self.send(req).await
     }
 
-    pub async fn s3_delete_object(&self, path: &str) -> Result<Response<IncomingAsyncBody>> {
+    pub async fn s3_delete_object(
+        &self,
+        path: &str,
+        args: &OpDelete,
+    ) -> Result<Response<IncomingAsyncBody>> {
         let p = build_abs_path(&self.root, path);
 
-        let url = format!("{}/{}", self.endpoint, percent_encode_path(&p));
+        let mut url = format!("{}/{}", self.endpoint, percent_encode_path(&p));
+
+        if let Some(version) = args.version() {
+            url = format!("{url}?versionId={version}");
+        }
 
         let mut req = Request::delete(&url)
             .body(AsyncBody::Empty)
@@ -664,7 +682,7 @@ impl S3Core {
 
     pub async fn s3_delete_objects(
         &self,
-        paths: Vec<String>,
+        paths: Vec<(String, Option<String>)>,
     ) -> Result<Response<IncomingAsyncBody>> {
         let url = format!("{}/?delete", self.endpoint);
 
@@ -673,8 +691,9 @@ impl S3Core {
         let content = quick_xml::se::to_string(&DeleteObjectsRequest {
             object: paths
                 .into_iter()
-                .map(|path| DeleteObjectsRequestObject {
+                .map(|(path, version)| DeleteObjectsRequestObject {
                     key: build_abs_path(&self.root, &path),
+                    version_id: version,
                 })
                 .collect(),
         })
@@ -694,6 +713,16 @@ impl S3Core {
         self.sign(&mut req).await?;
 
         self.send(req).await
+    }
+
+    pub(super) fn parse_metadata(&self, path: &str, headers: &HeaderMap) -> Result<Metadata> {
+        let mut metadata = parse_into_metadata(path, headers)?;
+
+        if let Some(version) = parse_header_to_str(headers, constants::X_AMZ_VERSION_ID)? {
+            metadata.set_version(version);
+        }
+
+        Ok(metadata)
     }
 }
 
@@ -759,6 +788,8 @@ pub struct DeleteObjectsRequest {
 #[serde(rename_all = "PascalCase")]
 pub struct DeleteObjectsRequestObject {
     pub key: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version_id: Option<String>,
 }
 
 /// Result of DeleteObjects.
@@ -897,9 +928,11 @@ mod tests {
             object: vec![
                 DeleteObjectsRequestObject {
                     key: "sample1.txt".to_string(),
+                    version_id: None,
                 },
                 DeleteObjectsRequestObject {
                     key: "sample2.txt".to_string(),
+                    version_id: None,
                 },
             ],
         };

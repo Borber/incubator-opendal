@@ -1,0 +1,16 @@
+[package]
+name = "s3_on_versioning_enable_bucket"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+license.workspace = true
+
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+opendal = { workspace = true, features = ['tests'] }
+tokio = { version = "1.27", features = ["full"]}
+uuid = { version = "1.6.1", features = ["v4"] }
+rand = "0.8.5"

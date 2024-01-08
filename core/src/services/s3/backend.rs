@@ -1057,7 +1057,10 @@ impl Accessor for S3Backend {
         let status = resp.status();
 
         match status {
-            StatusCode::OK => parse_into_metadata(path, resp.headers()).map(RpStat::new),
+            StatusCode::OK => self
+                .core
+                .parse_metadata(path, resp.headers())
+                .map(RpStat::new),
             _ => Err(parse_error(resp).await?),
         }
     }
@@ -1093,8 +1096,8 @@ impl Accessor for S3Backend {
         Ok((RpWrite::default(), w))
     }
 
-    async fn delete(&self, path: &str, _: OpDelete) -> Result<RpDelete> {
-        let resp = self.core.s3_delete_object(path).await?;
+    async fn delete(&self, path: &str, args: OpDelete) -> Result<RpDelete> {
+        let resp = self.core.s3_delete_object(path, &args).await?;
 
         let status = resp.status();
 
@@ -1173,7 +1176,14 @@ impl Accessor for S3Backend {
             .with_context("length", ops.len().to_string()));
         }
 
-        let paths = ops.into_iter().map(|(p, _)| p).collect();
+        let paths: Vec<(String, Option<String>)> = ops
+            .into_iter()
+            .map(|(p, op)| {
+                let BatchOperation::Delete(op) = op;
+
+                (p, op.version().map(|v| v.to_owned()))
+            })
+            .collect();
 
         let resp = self.core.s3_delete_objects(paths).await?;
 
