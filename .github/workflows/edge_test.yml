@@ -159,7 +159,9 @@ jobs:
           AWS_SECRET_ACCESS_KEY: "minioadmin"
           AWS_EC2_METADATA_DISABLED: "true"
         run: |
-          aws --endpoint-url http://127.0.0.1:9000/ s3 mb s3://test --versioning-configuration Status=Enabled
+          aws --endpoint-url http://127.0.0.1:9000/ s3 mb s3://test;
+  
+          aws s3api put-bucket-versioning --bucket test --versioning-configuration Status=Enabled
 
       - name: Test
         working-directory: core/edge/s3_on_versioning_enable_bucket
